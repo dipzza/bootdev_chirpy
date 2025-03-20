@@ -45,14 +45,14 @@ func main() {
 		),
 	)
 
-	serverMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+	serverMux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(200)
 		w.Write([]byte("OK"))
 	})
 
-	serverMux.Handle("GET /metrics", apiCfg.metrics())
-	serverMux.Handle("POST /reset", apiCfg.reset())
+	serverMux.Handle("GET /api/metrics", apiCfg.metrics())
+	serverMux.Handle("POST /api/reset", apiCfg.reset())
 	
 
 	server := http.Server{
