@@ -2,57 +2,17 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"strings"
-	"sync/atomic"
 )
 
-const metricsTemplate = `<html>
-	<body>
-		<h1>Welcome, Chirpy Admin</h1>
-		<p>Chirpy has been visited %d times!</p>
-	</body>
-</html>`
-
-type apiConfig struct {
-	fileserverHits atomic.Int32
-}
-
-func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg.fileserverHits.Add(1)
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (cfg *apiConfig) metrics() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Add("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(200)
-		w.Write(fmt.Appendf(nil, metricsTemplate, cfg.fileserverHits.Load()))
-	})
-}
-
-func (cfg *apiConfig) reset() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg.fileserverHits.Store(0)
-		w.Header().Add("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(200)
-	})
-}
-
 func main() {
-	apiCfg := apiConfig{}
+	apiMetrics := apiMetrics{}
 	serverMux := http.NewServeMux()
 
-	serverMux.Handle(
-		"/app/", 
-		http.StripPrefix("/app", 
-			apiCfg.middlewareMetricsInc(
-				http.FileServer(http.Dir(".")),
-			),
+	serverMux.Handle("/app/", http.StripPrefix("/app", 
+			apiMetrics.middlewareCountServerHit(http.FileServer(http.Dir("."))),
 		),
 	)
 
@@ -87,9 +47,8 @@ func main() {
 		respondWithJSON(w, http.StatusOK, res)
 	})
 
-	serverMux.Handle("GET /admin/metrics", apiCfg.metrics())
-	serverMux.Handle("POST /admin/reset", apiCfg.reset())
-	
+	serverMux.Handle("GET /admin/metrics", apiMetrics.metrics())
+	serverMux.Handle("POST /admin/reset", apiMetrics.reset())
 
 	server := http.Server{
 		Addr:    ":8080",
