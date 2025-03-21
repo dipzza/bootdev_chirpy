@@ -1,13 +1,37 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strings"
+
+	"github.com/dipzza/bootdev_chirpy/internal/database"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
+type apiConfig struct {
+	db *database.Queries
+}
+
 func main() {
+	if err := godotenv.Load(); err != nil {
+		log.Fatal(err)
+	}
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	dbQueries := database.New(db)
+	apiCfg := apiConfig{
+		db: dbQueries,
+	}
+
 	apiMetrics := apiMetrics{}
 	serverMux := http.NewServeMux()
 
