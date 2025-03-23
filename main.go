@@ -19,6 +19,7 @@ import (
 type apiConfig struct {
 	db *database.Queries
 	platform string
+	secret string
 }
 
 func main() {
@@ -35,6 +36,7 @@ func main() {
 	apiCfg := apiConfig{
 		db: dbQueries,
 		platform: os.Getenv("PLATFORM"),
+		secret: os.Getenv("SECRET"),
 	}
 
 	apiMetrics := apiMetrics{}
@@ -72,6 +74,7 @@ func main() {
 			respondWithError(w, http.StatusBadRequest, "Invalid JSON:" + err.Error())
 			return
 		}
+		
 		user, err := apiCfg.db.GetUser(r.Context(), params.Email)
 		authorized := err == nil && auth.CheckPasswordHash(params.Password, user.HashedPassword)
 		if !authorized {
@@ -79,20 +82,72 @@ func main() {
 			return
 		}
 
-		type UserResponse struct {
-			ID             uuid.UUID `json:"id"`
-			CreatedAt      time.Time `json:"created_at"`
-			UpdatedAt      time.Time `json:"updated_at"`
-			Email          string    `json:"email"`
-		}
-		userResponse := UserResponse{
-			ID: user.ID,
-			Email: user.Email,
-			CreatedAt: user.CreatedAt,
-			UpdatedAt: user.UpdatedAt,
+		accessToken, err := auth.MakeJWT(user.ID, apiCfg.secret)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, err.Error())
+			return
 		}
 
-		respondWithJSON(w, http.StatusOK, userResponse)
+		refreshToken := auth.MakeRefreshToken()
+
+		_, err = apiCfg.db.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+			Token: refreshToken,
+			UserID: user.ID,
+			ExpiresAt: time.Now().UTC().Add(time.Hour * 24 * 60),
+		})
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		responseBody := map[string]any{
+			"id": user.ID,
+			"created_at": user.CreatedAt,
+			"updated_at": user.UpdatedAt,
+			"email": user.Email,
+			"token": accessToken,
+			"refresh_token": refreshToken,
+		}
+
+		respondWithJSON(w, http.StatusOK, responseBody)
+	})
+	serverMux.HandleFunc("POST /api/refresh", func(w http.ResponseWriter, r *http.Request) {
+		token, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			respondWithError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+
+		user_id, err := apiCfg.db.GetUserFromRefreshToken(r.Context(), token)
+		if err != nil {
+			respondWithError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+
+		jwt, err := auth.MakeJWT(user_id, apiCfg.secret)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		respondWithJSON(w, http.StatusOK, map[string]any{
+			"token": jwt,
+		})
+	})
+	serverMux.HandleFunc("POST /api/revoke", func(w http.ResponseWriter, r *http.Request) {
+		token, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			respondWithError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+
+		err = apiCfg.db.RevokeRefreshToken(r.Context(), token)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		
+		respondWithJSON(w, http.StatusNoContent, nil)
 	})
 	serverMux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
 		type parameters struct {
@@ -146,9 +201,19 @@ func main() {
 		respondWithJSON(w, http.StatusOK, chirp)
 	})
 	serverMux.HandleFunc("POST /api/chirps", func(w http.ResponseWriter, r *http.Request) {
+		token, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			respondWithError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		userID, err := auth.ValidateJWT(token, apiCfg.secret)
+		if err != nil {
+			respondWithError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		
 		type parameters struct {
 			Body string `json:"body"`
-			UserId string `json:"user_id"`
 		}
 
 		decoder := json.NewDecoder(r.Body)
@@ -157,11 +222,7 @@ func main() {
 			respondWithError(w, http.StatusBadRequest, "Invalid JSON:" + err.Error())
 			return
 		}
-		userID, err := uuid.Parse(params.UserId)
-		if err != nil {
-			respondWithError(w, http.StatusBadRequest, "Invalid UUID:" + err.Error())
-			return
-		}
+		
 		if len(params.Body) > 140 {
 			respondWithError(w, http.StatusBadRequest, "Chirp is too long")
 			return
