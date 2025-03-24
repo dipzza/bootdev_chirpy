@@ -20,6 +20,7 @@ type apiConfig struct {
 	db *database.Queries
 	platform string
 	secret string
+	polka_key string
 }
 
 func main() {
@@ -37,6 +38,7 @@ func main() {
 		db: dbQueries,
 		platform: os.Getenv("PLATFORM"),
 		secret: os.Getenv("SECRET"),
+		polka_key: os.Getenv("POLKA_KEY"),
 	}
 
 	apiMetrics := apiMetrics{}
@@ -107,6 +109,7 @@ func main() {
 			"email": user.Email,
 			"token": accessToken,
 			"refresh_token": refreshToken,
+			"is_chirpy_red": user.IsChirpyRed,
 		}
 
 		respondWithJSON(w, http.StatusOK, responseBody)
@@ -176,8 +179,69 @@ func main() {
 		}
 		respondWithJSON(w, http.StatusCreated, user)
 	})
+	serverMux.HandleFunc("POST /api/polka/webhooks", func(w http.ResponseWriter, r *http.Request) {
+		apiKey, err := auth.GetAPIKey(r.Header)
+		if err != nil {
+			respondWithError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+		if apiKey != apiCfg.polka_key {
+			respondWithError(w, http.StatusUnauthorized, "Invalid API key")
+			return
+		}
+		
+		type parameters struct {
+			Event string `json:"event"`
+			Data struct {
+				ID string `json:"user_id"`
+			}`json:"data"`
+		}
+
+		decoder := json.NewDecoder(r.Body)
+		params := parameters{}
+		if err := decoder.Decode(&params); err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid JSON:" + err.Error())
+			return
+		}
+
+		if params.Event != "user.upgraded" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		userUUID, err := uuid.Parse(params.Data.ID)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid UUID:" + err.Error())
+			return
+		}
+
+		err = apiCfg.db.ActivateChirpyRed(r.Context(), userUUID)
+		if err != nil {
+			respondWithError(w, http.StatusNotFound, err.Error())
+			return
+		}
+
+		respondWithJSON(w, http.StatusNoContent, nil)
+	})
 
 	serverMux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, r *http.Request) {
+		s := r.URL.Query().Get("author_id")
+		if s != "" {
+			userUUID, err := uuid.Parse(s)
+			if err != nil {
+				respondWithError(w, http.StatusBadRequest, "Invalid UUID:" + err.Error())
+				return
+			}
+			
+			chirps, err := apiCfg.db.GetChirpsByAuthor(r.Context(), userUUID)
+			if err != nil {
+				respondWithError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			respondWithJSON(w, http.StatusOK, chirps)
+			return
+		}
+		
 		chirps, err := apiCfg.db.GetAllChirps(r.Context())
 		if err != nil {
 			respondWithError(w, http.StatusInternalServerError, err.Error())

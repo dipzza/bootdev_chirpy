@@ -15,3 +15,7 @@ WHERE id = $1;
 
 -- name: GetAllChirps :many
 SELECT * FROM chirps;
+
+-- name: GetChirpsByAuthor :many
+SELECT * FROM chirps
+WHERE user_id = $1;

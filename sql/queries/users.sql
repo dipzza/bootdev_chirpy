@@ -15,3 +15,8 @@ WHERE email = $1;
 
 -- name: DeleteAllUsers :exec
 DELETE FROM users;
+
+-- name: ActivateChirpyRed :exec
+UPDATE users
+SET is_chirpy_red = true
+WHERE id = $1;
