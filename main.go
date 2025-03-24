@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -225,28 +226,39 @@ func main() {
 	})
 
 	serverMux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, r *http.Request) {
-		s := r.URL.Query().Get("author_id")
-		if s != "" {
-			userUUID, err := uuid.Parse(s)
+		var chirps []database.Chirp
+		author_id := r.URL.Query().Get("author_id")
+		if author_id != "" {
+			userUUID, err := uuid.Parse(author_id)
 			if err != nil {
 				respondWithError(w, http.StatusBadRequest, "Invalid UUID:" + err.Error())
 				return
 			}
 			
-			chirps, err := apiCfg.db.GetChirpsByAuthor(r.Context(), userUUID)
+			chirps, err = apiCfg.db.GetChirpsByAuthor(r.Context(), userUUID)
 			if err != nil {
 				respondWithError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-			respondWithJSON(w, http.StatusOK, chirps)
-			return
+		} else {
+			chirps, err = apiCfg.db.GetAllChirps(r.Context())
+			if err != nil {
+				respondWithError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 		}
-		
-		chirps, err := apiCfg.db.GetAllChirps(r.Context())
-		if err != nil {
-			respondWithError(w, http.StatusInternalServerError, err.Error())
-			return
+
+		sortOption := r.URL.Query().Get("sort")
+		if sortOption == "desc" {
+			slices.SortFunc(chirps, func(a, b database.Chirp) int {
+				return b.CreatedAt.Compare(a.CreatedAt)
+			})
+		} else {
+			slices.SortFunc(chirps, func(a, b database.Chirp) int {
+				return a.CreatedAt.Compare(b.CreatedAt)
+			})
 		}
+
 		respondWithJSON(w, http.StatusOK, chirps)
 	})
 	serverMux.HandleFunc("GET /api/chirps/{id}", func(w http.ResponseWriter, r *http.Request) {
