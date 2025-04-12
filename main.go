@@ -22,6 +22,7 @@ type apiConfig struct {
 	platform string
 	secret string
 	polka_key string
+	port string
 }
 
 func main() {
@@ -40,10 +41,15 @@ func main() {
 		platform: os.Getenv("PLATFORM"),
 		secret: os.Getenv("SECRET"),
 		polka_key: os.Getenv("POLKA_KEY"),
+		port: os.Getenv("PORT"),
 	}
 
 	apiMetrics := apiMetrics{}
 	serverMux := http.NewServeMux()
+
+	serverMux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
 
 	serverMux.Handle("GET /admin/metrics", apiMetrics.metrics())
 	serverMux.Handle("POST /admin/reset", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -317,7 +323,7 @@ func main() {
 	})
 
 	server := http.Server{
-		Addr:    ":8080",
+		Addr:    ":" + apiCfg.port,
 		Handler: serverMux,
 	}
 	server.ListenAndServe()
